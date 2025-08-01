@@ -36,32 +36,13 @@ MuseScore {
 
         var selectedStaffIdx = curScore.selection.startStaff
         var selectedPart = curScore.staves[selectedStaffIdx].part
-        // var instrumentId = selectedPart.instrumentIdAtTick(curScore.selection.startSegment.tick)
         var endSegmentExists = curScore.selection.endSegment
 
-        // var count = 0
         for (var segment = curScore.selection.startSegment; segment && (!endSegmentExists || segment.tick < curScore.selection.endSegment.tick); segment = segment.next) {
             if (!curScore.staves[selectedStaffIdx].isTabStaff(segment.fraction)) {
                 error("Selection contains non-tab segment, select a range in a single tab staff")
                 quit()
             }
-            // if (selectedPart.instrumentIdAtTick(segment.tick) != instrumentId) {
-            //     error("Selection containing multiple instruments not supported, select a range with only one instrument")
-            //     quit()
-            // }
-            // if (segment.segmentType == Segment.ChordRest) {
-            //     var el = segment.elementAt(selectedStaffIdx*4)
-            //     if (el) {
-            //         if (el.type == Element.CHORD) {
-            //             printLog(`segment ${count}: note ${el.notes[0].pitch}`)
-            //         } else {
-            //             printLog(`segment ${count}: ${el.subtypeName()}`)
-            //         }
-            //     } else {
-            //         printLog(`segment ${count}: NULL`)
-            //     }
-            // }
-            // count += 1
         }
     }
 
@@ -74,47 +55,66 @@ MuseScore {
 
     function optimizeTab() {
         var noteToFrets = calculateFretPositions()
-        // for (const [note, l] of noteToFrets) {
-        //     var temp = `Note ${note}: `
-        //     for (var pos of l) {
-        //         temp += `(String ${pos.string} Fret ${pos.fret})`
-        //     }
-        //     printLog(temp)
-        // }
-        
-        // note.fret
-        // note.string
-        var count = 0
-        for (var segment = curScore.selection.startSegment;
-            segment && (!curScore.selection.endSegment || segment.tick < curScore.selection.endSegment.tick);
-            segment = segment.next) {
+        var result = optimizeHighestString(noteToFrets)
+        applyTabChanges(result)
+    }
+
+    function applyTabChanges(result) {
+        var stringCount = curScore.staves[curScore.selection.startStaff].part.instrumentAtTick(curScore.selection.startSegment.tick).stringData.strings.length
+        var selection = curScore.selection
+        var startSegment = selection.startSegment
+        var endSegment = selection.endSegment
+        var noteNumber = 0
+        for (var segment = startSegment; segment && (!endSegment || segment.tick < endSegment.tick); segment = segment.next) {
             if (segment.segmentType == Segment.ChordRest) {
                 var chord = segment.elementAt(curScore.selection.startStaff*4)
                 if (chord.type == Element.CHORD) {
                     if (chord.notes.length == 1) {
-                        var temp = `Note ${count}: ${chord.notes[0].pitch}\t${chord.notes[0].tpc1}\t${chord.notes[0].tpc2}\t${chord.notes[0].tpc}`
-                        for (var pos of noteToFrets.get(chord.notes[0].pitch)) {
-                            temp += `(String ${pos.string} Fret ${pos.fret})`
-                        }
-                        printLog(temp)
-                    } else {
-                        // printLog(`Note ${count}: chord`)
-
+                        // printLog(`changed note ${noteNumber} from\t${chord.notes[0].string} ${chord.notes[0].fret} to\t${stringCount - result[noteNumber].string - 1} ${result[noteNumber].fret}, pitch: ${chord.notes[0].pitch}`)
+                        chord.notes[0].fret = result[noteNumber].fret
+                        chord.notes[0].string = stringCount - result[noteNumber].string - 1
+                        noteNumber++
+                    } else if (chord.notes.length > 1) {
                         // TODO: How to handle chords?
                         // - find possible ways to play chord and use some fret to represent chord (bottom note fret, average fret, etc.)
                         // - ignore (might be better to deal with manually)
                     }
-                    count += 1
+                } else if (chord.type == Element.REST) {
+                    // printLog(`rest`)
                 }
             }
         }
-        return
+    }
+
+    function printNotes() {
+        var selection = curScore.selection
+        var startSegment = selection.startSegment
+        var endSegment = selection.endSegment
+        var noteNumber = 0
+        for (var segment = startSegment; segment && (!endSegment || segment.tick < endSegment.tick); segment = segment.next) {
+            if (segment.segmentType == Segment.ChordRest) {
+                var chord = segment.elementAt(curScore.selection.startStaff*4)
+                if (chord.type == Element.CHORD) {
+                    if (chord.notes.length == 1) {
+                        printLog(`note${noteNumber}:\t${chord.notes[0].pitch}`)
+                        noteNumber++
+                    } else if (chord.notes.length > 1) {
+                        var temp = `note${noteNumber}:\t`
+                        for (var note of chord.notes) {
+                            temp += `${note.pitch} `
+                        }
+                        printLog(temp)
+                    }
+                } else if (chord.type == Element.REST) {
+                    printLog(`rest`)
+                }
+            }
+        }
     }
 
     function calculateFretPositions() {
         var staff = curScore.staves[curScore.selection.startStaff]
         var transpose = staff.transpose(curScore.selection.startSegment.fraction).chromatic
-        // printLog(`transpose: ${staff.transpose(curScore.selection.startSegment.fraction).chromatic}`)
         var instrument = staff.part.instrumentAtTick(curScore.selection.startSegment.tick)
         var strings = instrument.stringData.strings
         var frets = instrument.stringData.frets
@@ -140,6 +140,24 @@ MuseScore {
             }
         }
         return map
+    }
+
+    function optimizeHighestString(noteToFrets) {
+        var result = []
+        for (var segment = curScore.selection.startSegment;
+            segment && (!curScore.selection.endSegment || segment.tick < curScore.selection.endSegment.tick);
+            segment = segment.next) {
+            if (segment.segmentType == Segment.ChordRest) {
+                var chord = segment.elementAt(curScore.selection.startStaff*4)
+                if (chord && chord.type == Element.CHORD) {
+                    if (chord.notes.length == 1) {
+                        var l = noteToFrets.get(chord.notes[0].pitch)
+                        result.push(l[l.length-1])
+                    }
+                }
+            }
+        }
+        return result
     }
 
     function printLog(s) {
@@ -215,6 +233,14 @@ MuseScore {
                     if (!applyOptimizeTab()) {
                         quit()
                     }
+                }
+            }
+            FlatButton {
+                id: testButton
+                width: 90
+                text: "Print notes"
+                onClicked: {
+                    printNotes()
                 }
             }
         }
