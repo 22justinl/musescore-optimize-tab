@@ -55,7 +55,8 @@ MuseScore {
 
     function optimizeTab() {
         var noteToFrets = calculateFretPositions()
-        var result = optimizeHighestString(noteToFrets)
+        var result = optimizeGraphGreedy(noteToFrets)
+        // var result = optimizeHighestString(noteToFrets)
         applyTabChanges(result)
     }
 
@@ -68,19 +69,21 @@ MuseScore {
         for (var segment = startSegment; segment && (!endSegment || segment.tick < endSegment.tick); segment = segment.next) {
             if (segment.segmentType == Segment.ChordRest) {
                 var chord = segment.elementAt(curScore.selection.startStaff*4)
-                if (chord.type == Element.CHORD) {
-                    if (chord.notes.length == 1) {
-                        // printLog(`changed note ${noteNumber} from\t${chord.notes[0].string} ${chord.notes[0].fret} to\t${stringCount - result[noteNumber].string - 1} ${result[noteNumber].fret}, pitch: ${chord.notes[0].pitch}`)
-                        chord.notes[0].fret = result[noteNumber].fret
-                        chord.notes[0].string = stringCount - result[noteNumber].string - 1
+                if (chord) {
+                    if (chord.type == Element.CHORD) {
+                        if (chord.notes.length == 1) {
+                            // printLog(`changed note ${noteNumber} from\t${chord.notes[0].string} ${chord.notes[0].fret} to\t${stringCount - result[noteNumber].string - 1} ${result[noteNumber].fret}, pitch: ${chord.notes[0].pitch}`)
+                            chord.notes[0].fret = result[noteNumber].fret
+                            chord.notes[0].string = stringCount - result[noteNumber].string - 1
+                        } else if (chord.notes.length > 1) {
+                            // TODO: How to handle chords?
+                            // - find possible ways to play chord and use some fret to represent chord (bottom note fret, average fret, etc.)
+                            // - ignore (might be better to deal with manually)
+                        }
                         noteNumber++
-                    } else if (chord.notes.length > 1) {
-                        // TODO: How to handle chords?
-                        // - find possible ways to play chord and use some fret to represent chord (bottom note fret, average fret, etc.)
-                        // - ignore (might be better to deal with manually)
+                    } else if (chord.type == Element.REST) {
+                        // printLog(`rest`)
                     }
-                } else if (chord.type == Element.REST) {
-                    // printLog(`rest`)
                 }
             }
         }
@@ -94,19 +97,21 @@ MuseScore {
         for (var segment = startSegment; segment && (!endSegment || segment.tick < endSegment.tick); segment = segment.next) {
             if (segment.segmentType == Segment.ChordRest) {
                 var chord = segment.elementAt(curScore.selection.startStaff*4)
-                if (chord.type == Element.CHORD) {
-                    if (chord.notes.length == 1) {
-                        printLog(`note${noteNumber}:\t${chord.notes[0].pitch}`)
-                        noteNumber++
-                    } else if (chord.notes.length > 1) {
-                        var temp = `note${noteNumber}:\t`
-                        for (var note of chord.notes) {
-                            temp += `${note.pitch} `
+                if (chord) {
+                    if (chord.type == Element.CHORD) {
+                        if (chord.notes.length == 1) {
+                            printLog(`note ${noteNumber}:\t${chord.notes[0].pitch}`)
+                        } else if (chord.notes.length > 1) {
+                            var temp = `note ${noteNumber}:\t`
+                            for (var note of chord.notes) {
+                                temp += `${note.pitch} `
+                            }
+                            printLog(temp)
                         }
-                        printLog(temp)
+                    } else if (chord.type == Element.REST) {
+                        printLog(`rest`)
                     }
-                } else if (chord.type == Element.REST) {
-                    printLog(`rest`)
+                    noteNumber++
                 }
             }
         }
@@ -144,19 +149,143 @@ MuseScore {
 
     function optimizeHighestString(noteToFrets) {
         var result = []
-        for (var segment = curScore.selection.startSegment;
-            segment && (!curScore.selection.endSegment || segment.tick < curScore.selection.endSegment.tick);
-            segment = segment.next) {
+        var selection = curScore.selection
+        var startSegment = selection.startSegment
+        var endSegment = selection.endSegment
+        for (var segment = startSegment; segment && (!endSegment || segment.tick < endSegment.tick); segment = segment.next) {
             if (segment.segmentType == Segment.ChordRest) {
                 var chord = segment.elementAt(curScore.selection.startStaff*4)
-                if (chord && chord.type == Element.CHORD) {
-                    if (chord.notes.length == 1) {
-                        var l = noteToFrets.get(chord.notes[0].pitch)
-                        result.push(l[l.length-1])
+                if (chord) {
+                    if (chord.type == Element.CHORD) {
+                        if (chord.notes.length == 1) {
+                            var l = noteToFrets.get(chord.notes[0].pitch)
+                            result.push(l[l.length-1])
+                        } else {
+                            // TODO: how to handle chords?
+                            result.push({})
+                        }
                     }
                 }
             }
         }
+        return result
+    }
+
+    function createGraph(noteToFrets) {
+        var selection = curScore.selection
+        var startSegment = selection.startSegment
+        var endSegment = selection.endSegment
+        var noteNumber = 0
+
+        // create vertices
+        var g = [new Map()]     // source vertex
+        g[0].set(0, {pos: undefined, neighbors: []})
+        for (var segment = startSegment; segment && (!endSegment || segment.tick < endSegment.tick); segment = segment.next) {
+            if (segment.segmentType == Segment.ChordRest) {
+                var chord = segment.elementAt(curScore.selection.startStaff*4)
+                if (chord) {
+                    if (chord.type == Element.CHORD) {
+                        if (chord.notes.length == 1) {
+                            g.push(new Map())
+                            for (var pos of noteToFrets.get(chord.notes[0].pitch)) {
+                                g[g.length-1].set(pos.string, {pos: pos, neighbors: []})
+                            }
+                            noteNumber++
+                        }
+                    }
+                }
+            }
+        }
+        g.push(new Map())       // sink vertex
+        g[g.length-1].set(0, {pos: undefined, neighbors: []})
+
+        // create edges
+        // add zero-weight edges from source
+        for (var v of g[1].values()) {
+            g[0].get(0).neighbors.push({string: v.pos.string, weight: 0})
+        }
+        
+        // add other edges
+        for (var i = 1; i < g.length-1; ++i) {
+            // printLog(`Note ${i-1}-----------------------`)
+            for (var u of g[i].values()) {
+                // printLog(`\t${u.pos.string} ${u.pos.fret}=>`)
+                for (var v of g[i+1].values()) {
+                    if (v.pos) {
+                        var weight = calculateEdgeWeight(u.pos, v.pos)
+                        u.neighbors.push({string: v.pos.string, weight: weight})
+                        // printLog(`\t\t${v.pos.string} ${v.pos.fret} - weight: ${weight}`)
+                    } else {
+                        u.neighbors.push({string: 0, weight: 0})
+                        // printLog(`\t\tend`)
+                    }
+                }
+            }
+        }
+        return g
+    }
+
+    function calculateEdgeWeight(pos1, pos2) {
+        // TODO: needs tweaking
+        
+        var openStringCost = 0
+        var stringCrossingCost = 2
+
+        var weight = 0
+
+        if (pos2.fret == 0 || pos1.fret == 0) {
+            // open string
+            weight += openStringCost
+        } else {
+            // fret distance
+            var diff = Math.abs(pos1.fret - pos2.fret)
+            if (diff > 4) {
+                weight += diff
+            }
+        }
+        if (pos1.string != pos2.string) {
+            // string crossing
+            var diff = Math.abs(pos1.string-pos2.string)
+            if (diff > 1) {
+                weight += stringCrossingCost * diff
+            }
+        } else {
+            weight += 1
+        }
+
+        return weight
+    }
+
+    function optimizeGraphGreedy(noteToFrets) {
+        var g = createGraph(noteToFrets)
+        var result = []
+        for (var note of g[1].values()) {
+            result.push(note.pos)
+            printLog(`note 0: ${note.pos.string} ${note.pos.fret}`)
+            break;
+        }
+        for (var i = 1; i < g.length-2; ++i) {
+            var u = g[i].get(result[i-1].string)
+            var minValue = u.neighbors[0].weight
+            var minString = u.neighbors[0].string
+            for (var v of u.neighbors) {
+                if (v.weight < minValue) {
+                    minValue = v.weight
+                    minString = v.string
+                }
+            }
+            var minPos = g[i+1].get(minString).pos
+            printLog(`note ${i}: ${minPos.string} ${minPos.fret}, weight ${minValue}`)
+            result.push(minPos)
+        }
+        printLog(`result length: ${result.length}`)
+        return result
+    }
+    
+    function optimizeGraphDAGShortestPath(noteToFrets) {
+        // TODO:
+        var g = createGraph(noteToFrets)
+        var result []
         return result
     }
 
