@@ -71,7 +71,7 @@ MuseScore {
                 return 1
         }
         applyTabChanges(result)
-        return 0
+        return 1
     }
 
     function applyTabChanges(result) {
@@ -263,8 +263,6 @@ MuseScore {
             if (diff > 1) {
                 weight += stringCrossingCost * diff
             }
-        } else {
-            weight += 1
         }
 
         return weight
@@ -297,9 +295,37 @@ MuseScore {
     }
     
     function optimizeGraphDAGShortestPath(noteToFrets) {
-        // TODO:
         var g = createGraph(noteToFrets)
-        var result = []
+        g[0].get(0).minValue = 0
+        g[0].get(0).pred = undefined
+        for (var i = 0; i < g.length-1; ++i) {
+            printLog(`Note ${i-1} ----------------`)
+            for (var u of g[i].values()) {
+                for (var neighbor of u.neighbors) {
+                    var val = u.minValue + neighbor.weight
+                    if (g[i+1].get(neighbor.string).minValue == undefined || val < g[i+1].get(neighbor.string).minValue) {
+                        g[i+1].get(neighbor.string).minValue = val
+                        g[i+1].get(neighbor.string).pred = u.pos ? u.pos.string : 0
+                    }
+                }
+            }
+            for (var v of g[i+1].values()) {
+                if (v.pos) {
+                    printLog(`\t${v.pos.string} ${v.pos.fret} minVal: ${v.minValue}`)
+                } else {
+                    printLog(`\tend minVal: ${v.minValue}`)
+                }
+            }
+        }
+
+        // backtrack
+        var result = Array(g.length-2)
+        for (var i = g.length - 2; i > 0; --i) {
+            result[i-1] = g[i].get(g[i+1].get(0).pred).pos
+        }
+        for (var i = 0; i < result.length; ++i) {
+            printLog(`Note ${i}: ${result[i].string} ${result[i].fret}`)
+        }
         return result
     }
 
