@@ -48,16 +48,30 @@ MuseScore {
 
     function applyOptimizeTab() {
         curScore.startCmd()
-        optimizeTab()
+        var result = optimizeTab()
         curScore.endCmd()
-        return 1
+        return result
     }
 
     function optimizeTab() {
         var noteToFrets = calculateFretPositions()
-        var result = optimizeGraphGreedy(noteToFrets)
-        // var result = optimizeHighestString(noteToFrets)
+        var result = []
+        switch (optimizationStrategyDropdown.currentText) {
+            case "Highest String":
+                result = optimizeHighestString(noteToFrets)
+                break
+            case "Graph Greedy":
+                result = optimizeGraphGreedy(noteToFrets)
+                break
+            case "Graph Shortest Path":
+                result = optimizeGraphDAGShortestPath(noteToFrets)
+                break
+            default:
+                error("No optimization strategy selected")
+                return 1
+        }
         applyTabChanges(result)
+        return 0
     }
 
     function applyTabChanges(result) {
@@ -285,7 +299,7 @@ MuseScore {
     function optimizeGraphDAGShortestPath(noteToFrets) {
         // TODO:
         var g = createGraph(noteToFrets)
-        var result []
+        var result = []
         return result
     }
 
@@ -301,6 +315,21 @@ MuseScore {
         errorDialog.open()
     }
 
+    ListModel {
+        id: optimizationStrategyListModel
+        ListElement {
+            text: "Highest String"
+            value: "Highest String"
+        }
+        ListElement {
+            text: "Graph Greedy"
+            value: "Graph Greedy"
+        }
+        ListElement {
+            text: "Graph Shortest Path"
+            value: "Graph Shortest Path"
+        }
+    }
 
     Column {
         topPadding: 10
@@ -315,10 +344,16 @@ MuseScore {
             rows: 2
             columns: 2
             spacing: 10
-            FlatButton {
-                width: 90
-                onClicked: {
-                    printLog("button 1")
+            StyledDropdown {
+                id: optimizationStrategyDropdown
+                model: [
+                    {text: "Highest String", value: "Highest String"},
+                    {text: "Graph Greedy", value: "Graph Greedy"},
+                    {text: "Graph Shortest Path", value: "Graph Shortest Path"}
+                ]
+                currentIndex: 0
+                onActivated: function(index, value) {
+                    currentIndex = index
                 }
             }
             FlatButton {
