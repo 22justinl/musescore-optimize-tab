@@ -192,8 +192,9 @@ MuseScore {
         var noteNumber = 0
 
         // map of vertices for note n:  g[n]
-        // vertex:                      g[noteNumber].get((string,)) = {pos, neighbors}
+        // vertex:                      g[noteNumber].get((string,)) = {pos, finger, neighbors}
         // vertex.pos:                  {string, fret}
+        // vertex.finger:               0,...,3
         // vertex.neighbors:            [neighbor1, ...]
         // neighbor:                    {ptr = (string, ), weight}
         // neighbor vertex:             g[n+1].get(neighbor.ptr)
@@ -209,7 +210,9 @@ MuseScore {
                         if (chord.notes.length == 1) {
                             g.push(new Map())
                             for (var pos of noteToFrets.get(chord.notes[0].pitch)) {
-                                g[g.length-1].set((pos.string), {pos: pos, neighbors: []})
+                                for (var finger = 0; finger < 4; ++finger) {
+                                    g[g.length-1].set((pos.string, finger), {pos: pos, finger: finger, neighbors: []})
+                                }
                             }
                             noteNumber++
                         }
@@ -223,7 +226,7 @@ MuseScore {
         // create edges
         // add zero-weight edges from source
         for (var v of g[1].values()) {
-            g[0].get(0).neighbors.push({ptr: (v.pos.string), weight: 0})
+            g[0].get(0).neighbors.push({ptr: (v.pos.string, v.finger), weight: 0})
         }
         
         // add other edges
@@ -231,10 +234,10 @@ MuseScore {
             for (var u of g[i].values()) {
                 for (var v of g[i+1].values()) {
                     if (v.pos) {
-                        var weight = calculateEdgeWeight(u.pos, v.pos)
-                        u.neighbors.push({ptr: (v.pos.string), weight: weight})
+                        var weight = calculateEdgeWeight(u, v)
+                        u.neighbors.push({ptr: (v.pos.string, v.finger), weight: weight})
                     } else {
-                        u.neighbors.push({ptr: (0), weight: 0})
+                        u.neighbors.push({ptr: (0, 0), weight: 0})
                     }
                 }
             }
@@ -242,9 +245,10 @@ MuseScore {
         return g
     }
 
-    function calculateEdgeWeight(pos1, pos2) {
+    function calculateEdgeWeight(u, v) {
         // TODO: needs tweaking
-        
+        var pos1 = u.pos
+        var pos2 = v.pos
         var openStringCost = 0
         var stringCrossingCost = 2
 
@@ -274,12 +278,14 @@ MuseScore {
     function optimizeGraphGreedy(noteToFrets) {
         var g = createGraph(noteToFrets)
         var result = []
+        var ptrs = []
         for (var note of g[1].values()) {
             result.push(note.pos)
+            ptrs.push((note.pos.string, note.finger))
             break;
         }
         for (var i = 1; i < g.length-2; ++i) {
-            var u = g[i].get(result[i-1].string)
+            var u = g[i].get((ptrs[i-1][0], ptrs[i-1][1]))
             var minValue = u.neighbors[0].weight
             var minPtr = u.neighbors[0].ptr
             for (var neighbor of u.neighbors) {
@@ -290,14 +296,15 @@ MuseScore {
             }
             var minPos = g[i+1].get(minPtr).pos
             result.push(minPos)
+            result.push(minPtr)
         }
         return result
     }
     
     function optimizeGraphDAGShortestPath(noteToFrets) {
         var g = createGraph(noteToFrets)
-        g[0].get(0).minValue = 0
-        g[0].get(0).predPtr = undefined
+        g[0].get((0,0)).minValue = 0
+        g[0].get((0,0)).predPtr = undefined
         for (var i = 0; i < g.length-1; ++i) {
             printLog(`Note ${i-1} ----------------`)
             for (var u of g[i].values()) {
@@ -306,7 +313,7 @@ MuseScore {
                     var v = g[i+1].get(neighbor.ptr)
                     if (v.minValue == undefined || val < v.minValue) {
                         g[i+1].get(neighbor.ptr).minValue = val
-                        g[i+1].get(neighbor.ptr).predPtr = u.pos ? (u.pos.string) : 0
+                        g[i+1].get(neighbor.ptr).predPtr = u.pos ? (u.pos.string, u.finger) : 0
                     }
                 }
             }
@@ -321,12 +328,15 @@ MuseScore {
 
         // backtrack
         var result = Array(g.length-2)
+        var predPtr = g[g.length-1].get((0,0)).predPtr
         for (var i = g.length - 2; i > 0; --i) {
-            result[i-1] = g[i].get(g[i+1].get(0).predPtr).pos
+            var v = g[i].get(predPtr)
+            result[i-1] = v.pos
+            predPtr = (v.pos.string, v.finger)
         }
-        for (var i = 0; i < result.length; ++i) {
-            printLog(`Note ${i}: ${result[i].string} ${result[i].fret}`)
-        }
+        // for (var i = 0; i < result.length; ++i) {
+        //     printLog(`Note ${i}: ${result[i].string} ${result[i].fret}`)
+        // }
         return result
     }
 
