@@ -191,9 +191,16 @@ MuseScore {
         var endSegment = selection.endSegment
         var noteNumber = 0
 
+        // map of vertices for note n:  g[n]
+        // vertex:                      g[noteNumber].get((string,)) = {pos, neighbors}
+        // vertex.pos:                  {string, fret}
+        // vertex.neighbors:            [neighbor1, ...]
+        // neighbor:                    {ptr = (string, ), weight}
+        // neighbor vertex:             g[n+1].get(neighbor.ptr)
+
         // create vertices
         var g = [new Map()]     // source vertex
-        g[0].set(0, {pos: undefined, neighbors: []})
+        g[0].set((0), {pos: undefined, neighbors: []})
         for (var segment = startSegment; segment && (!endSegment || segment.tick < endSegment.tick); segment = segment.next) {
             if (segment.segmentType == Segment.ChordRest) {
                 var chord = segment.elementAt(curScore.selection.startStaff*4)
@@ -202,7 +209,7 @@ MuseScore {
                         if (chord.notes.length == 1) {
                             g.push(new Map())
                             for (var pos of noteToFrets.get(chord.notes[0].pitch)) {
-                                g[g.length-1].set(pos.string, {pos: pos, neighbors: []})
+                                g[g.length-1].set((pos.string), {pos: pos, neighbors: []})
                             }
                             noteNumber++
                         }
@@ -216,22 +223,18 @@ MuseScore {
         // create edges
         // add zero-weight edges from source
         for (var v of g[1].values()) {
-            g[0].get(0).neighbors.push({string: v.pos.string, weight: 0})
+            g[0].get(0).neighbors.push({ptr: (v.pos.string), weight: 0})
         }
         
         // add other edges
         for (var i = 1; i < g.length-1; ++i) {
-            // printLog(`Note ${i-1}-----------------------`)
             for (var u of g[i].values()) {
-                // printLog(`\t${u.pos.string} ${u.pos.fret}=>`)
                 for (var v of g[i+1].values()) {
                     if (v.pos) {
                         var weight = calculateEdgeWeight(u.pos, v.pos)
-                        u.neighbors.push({string: v.pos.string, weight: weight})
-                        // printLog(`\t\t${v.pos.string} ${v.pos.fret} - weight: ${weight}`)
+                        u.neighbors.push({ptr: (v.pos.string), weight: weight})
                     } else {
-                        u.neighbors.push({string: 0, weight: 0})
-                        // printLog(`\t\tend`)
+                        u.neighbors.push({ptr: (0), weight: 0})
                     }
                 }
             }
@@ -273,55 +276,53 @@ MuseScore {
         var result = []
         for (var note of g[1].values()) {
             result.push(note.pos)
-            printLog(`note 0: ${note.pos.string} ${note.pos.fret}`)
             break;
         }
         for (var i = 1; i < g.length-2; ++i) {
             var u = g[i].get(result[i-1].string)
             var minValue = u.neighbors[0].weight
-            var minString = u.neighbors[0].string
-            for (var v of u.neighbors) {
-                if (v.weight < minValue) {
-                    minValue = v.weight
-                    minString = v.string
+            var minPtr = u.neighbors[0].ptr
+            for (var neighbor of u.neighbors) {
+                if (neighbor.weight < minValue) {
+                    minValue = neighbor.weight
+                    minString = neighbor.ptr
                 }
             }
-            var minPos = g[i+1].get(minString).pos
-            printLog(`note ${i}: ${minPos.string} ${minPos.fret}, weight ${minValue}`)
+            var minPos = g[i+1].get(minPtr).pos
             result.push(minPos)
         }
-        printLog(`result length: ${result.length}`)
         return result
     }
     
     function optimizeGraphDAGShortestPath(noteToFrets) {
         var g = createGraph(noteToFrets)
         g[0].get(0).minValue = 0
-        g[0].get(0).pred = undefined
+        g[0].get(0).predPtr = undefined
         for (var i = 0; i < g.length-1; ++i) {
             printLog(`Note ${i-1} ----------------`)
             for (var u of g[i].values()) {
                 for (var neighbor of u.neighbors) {
                     var val = u.minValue + neighbor.weight
-                    if (g[i+1].get(neighbor.string).minValue == undefined || val < g[i+1].get(neighbor.string).minValue) {
-                        g[i+1].get(neighbor.string).minValue = val
-                        g[i+1].get(neighbor.string).pred = u.pos ? u.pos.string : 0
+                    var v = g[i+1].get(neighbor.ptr)
+                    if (v.minValue == undefined || val < v.minValue) {
+                        g[i+1].get(neighbor.ptr).minValue = val
+                        g[i+1].get(neighbor.ptr).predPtr = u.pos ? (u.pos.string) : 0
                     }
                 }
             }
-            for (var v of g[i+1].values()) {
-                if (v.pos) {
-                    printLog(`\t${v.pos.string} ${v.pos.fret} minVal: ${v.minValue}`)
-                } else {
-                    printLog(`\tend minVal: ${v.minValue}`)
-                }
-            }
+            // for (var v of g[i+1].values()) {
+            //     if (v.pos) {
+            //         printLog(`\t${v.pos.string} ${v.pos.fret} minVal: ${v.minValue}`)
+            //     } else {
+            //         printLog(`\tend minVal: ${v.minValue}`)
+            //     }
+            // }
         }
 
         // backtrack
         var result = Array(g.length-2)
         for (var i = g.length - 2; i > 0; --i) {
-            result[i-1] = g[i].get(g[i+1].get(0).pred).pos
+            result[i-1] = g[i].get(g[i+1].get(0).predPtr).pos
         }
         for (var i = 0; i < result.length; ++i) {
             printLog(`Note ${i}: ${result[i].string} ${result[i].fret}`)
